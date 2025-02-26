@@ -1,0 +1,115 @@
+---
+title: "Analysis"
+date: "`r Sys.Date()`"
+author: "Rich Evans, PhD, PSTAT"
+format: pdf
+number-sections: true
+execute: 
+  echo: false
+---
+
+# Summary
+
+# Notes
+
+1. For efficiency, I cut-and-pasted code, which may cause mislabeled tables or plots, or possibly duplicated analysis with wrong titles. I think I caught everything but don't be alarmed if there is an error. It is easily fixed.
+
+# To Do
+
+1.  Comparison with urine.
+
+2.  Correlations between lung and liver tissues.
+
+3.  More post-hoc testing. In the first set of analysis, for lung ebgii, only _treatment_ was statistically significant, so I wrote code to post-hoc test _treatment_ and no other variables. Subsequent analyses of other variables suggest that other fixed effects (e.g., strain) were significant, so I have to go back and test those. But this is a start.
+
+\newpage
+
+# Results
+
+## Table Ones
+
+```{r}
+#| label: setup
+#| echo: false
+#| include: false
+
+library(here)
+
+
+# Set global chunk options
+knitr::opts_chunk$set(
+  echo = FALSE,         # Show code by default
+  warning = FALSE,     # Hide warnings in the output
+  message = FALSE,     # Hide messages in the output
+  fig.width = 4,       # Default figure width
+  fig.height = 2.666,      # Default figure height
+  fig.align = "center" # Center align figures
+)
+
+# Set seed for reproducibility
+set.seed(1234)
+
+```
+
+```{r}
+#| label: read-data
+#| include: false
+
+df <- readxl::read_xlsx(here("data","re.xlsx"), na = c("NF", "NA", "N/A"))
+
+df <- clean_names(df)
+
+skim(df)
+
+#---------------------------multiple sheets----------------------------
+
+df_list = here("data","Katie_Final_Data_Collection_Tables.xlsx") %>% 
+  excel_sheets() %>% 
+  purrr::set_names() %>% 
+    map(~ read_excel(path = here("data","Katie_Final_Data_Collection_Tables.xlsx"), sheet = .x, na = c("N/A", "Missing")))
+
+
+df_list <- lapply(df_list,clean_names)
+
+remove_na_columns <- function(df) {
+  df[, colSums(is.na(df)) == 0]
+}
+
+# Apply the function to each dataframe in the list to remove empty columns
+df_list_cleaned <- lapply(df_list, remove_na_columns)
+
+```
+
+\newpage
+
+## Stats write up
+
+The statistical analysis was in two parts. First, the data were summarized with means with standard errors, and medians with minimum and maximums, and plotted with histograms to check for spurious observations and assess data symmetry. Repeated measures ANOVA was used to compare overall AMM and BMM. Second, intraclass correlations (ICC) with 95% confidence intervals were used to assess inter- and intra-rater reliability. P-values were used for inferences comparing the ICCs. Statistical significance was set at 0.05 for tests of two ICCs, and using the Bonferroni Correction was set at 0.017 for pairwise comparisons of three ICCs. 
+
+
+## Software References
+
+
+```{r}
+
+# Get and print pwr package version
+pwr_version <- as.character(packageVersion("pwr"))
+cat("pwr package version:", pwr_version, "\n")
+
+# Get citation for pwr without BibTeX output
+pwr_citation <- citation("pwr")
+print(pwr_citation, style = "text")  # Suppresses BibTeX
+
+cat("\n\n")
+
+# Get and print R version
+r_version <- as.character(getRversion())
+cat("R version:", r_version, "\n")
+
+# Get citation for R without the extra message or BibTeX
+r_citation <- citation()
+print(r_citation, style = "text")  # Suppresses extra messages and BibTeX
+```
+
+
+**End of Document**
