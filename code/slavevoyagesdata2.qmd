@@ -1,0 +1,198 @@
+---
+title: "slavevoyagesdata"
+format: html
+editor: source
+---
+
+```{r}
+#| label: setup
+#| echo: false
+#| include: false
+
+library(here)
+library(rjags)
+library(JointAI)
+library(tictoc)
+
+
+# Set global chunk options
+knitr::opts_chunk$set(
+  echo = FALSE,         # Show code by default
+  warning = FALSE,     # Hide warnings in the output
+  message = FALSE,     # Hide messages in the output
+  fig.width = 4,       # Default figure width
+  fig.height = 2.666,      # Default figure height
+  fig.align = "center" # Center align figures
+)
+
+# Set seed for reproducibility
+```
+
+```{r}
+#from website with filter: Principal place where captives were landed -> Rhode Island
+
+load(here("data","DCSTVoyages.RData"))
+
+slaveVoy_df <- read.xlsx(here("data","fromWebsitefilterRhodeIsland.xlsx"))
+
+
+# df %>%
+#   select(where(~ any(grepl("north america", .x, ignore.case = TRUE)))) %>%
+#   names()
+
+unique(DCSTVoyages$First_region_of_slave_landing)
+
+us_states_from_list <- c(
+  "Florida", "Georgia", "Maryland", "Virginia", "New York",
+  "South Carolina", "Rhode Island", "Pennsylvania", "North Carolina",
+  "New Jersey", "New Hampshire", "Massachusetts", "Connecticut", "Maine"
+)
+
+# us_states_from_list <- c(
+#   "New York",
+#   "Rhode Island", "Pennsylvania",
+#   "New Jersey", "New Hampshire", "Massachusetts", "Connecticut", "Maine"
+# )
+
+```
+
+select only the variables important for imputation
+
+```{r}
+
+df <- DCSTVoyages  |> filter(First_region_of_slave_landing %in% us_states_from_list) |>
+  select(
+    voyage_id
+    , Year_of_arrival
+    , imputed_Year_of_arrival_at_port_of_disembarkation
+    #vessel attributes
+    , Name_of_the_vessel
+    , Rig_of_vessel
+    , Tonnage_standardized_on_British_measured_tons_1773_1835
+    , Tonnage_of_the_vessel
+    , Place_where_vessel_constructed
+    
+    #purchase location
+    , Principal_place_of_slave_purchase
+    #, Imputed_principal_place_of_slave_purchase
+    
+    #embark
+    , Total_slaves_purchased
+    #, Imputed_total_slaves_embarked
+    
+     #disembark
+    , Total_slaves_arrived_at_first_port_of_disembarkation
+    #, Imputed_total_slaves_disembarked
+    
+      #disembark region
+    , First_region_of_slave_landing
+    , Principal_port_of_slave_disembarkation
+   # , Imputed_principal_port_of_slave_disembarkation
+    , First_place_of_slave_landing
+    , Place_at_which_voyage_ended
+    , First_intended_port_of_disembarkation
+
+  ) |>
+  mutate(
+    location = as.factor(First_region_of_slave_landing),
+    purchased = Total_slaves_purchased,
+    arrived = Total_slaves_arrived_at_first_port_of_disembarkation,
+    voyage = voyage_id,
+    rig = as.factor(Rig_of_vessel),
+    tonnage = as.numeric(Tonnage_standardized_on_British_measured_tons_1773_1835)
+  ) 
+
+
+#names(df)
+if(FALSE){
+  write.csv(df,here("data","df.csv"))
+
+unique(df$location)
+    
+unique(df$Place_where_vessel_constructed)
+
+}
+
+```
+
+Now impute
+
+```{r}
+
+toc("Imputation time")
+
+df2 <- df |> filter(location == "South Carolina") |> select(location,purchased,arrived,voyage,tonnage,rig)
+
+
+imp_test <- lm_imp(
+  arrived ~ purchased + location + tonnage + rig,
+  data = df2,
+ # trunc = list(purchased = c(0, 1000), tonnage = c(25,1000)),
+  trunc = list(purchased = c(0, 1000), arrived = c(0, 1000)),
+  monitor_params = c(imps = TRUE),
+  n.adapt = 500,
+  n.iter = 1000,
+  n.chains = 2,
+  seed = 123
+)
+
+
+df.out <- get_MIdat(imp_test, m = 5, seed = 123)
+
+
+
+
+
+
+if(FALSE){
+  save(df.out, file = here("data", "my_dataframe.RData"))
+  
+  imp_test$MCMC
+
+summary(imp_test)
+
+head(df2)
+}
+
+toc()
+
+```
+
+now calculate the distribution of the imputed totals for ONE ship and ONE location
+
+find one ship with complete data except for arrived numbers and impute the arrived numbers. 
+then find one with maybe rig missing or something else and show how the spread of arrived numbers increases.
+
+
+```{r}
+
+df.out |> filter(location=="Rhode Island") |> group_by(.id) |> 
+  summarize(median_arr = median(arrived, na.rm = TRUE),
+            IQR = IQR(arrived, na.rm=TRUE))
+
+df.out |> filter(.id == 758)
+df.out |> filter(.id == 759)
+
+
+
+```
+
+Now compare the distribution of the imputed totals to the totals from the website
+Place of first landing is Rhode Island
+
+```{r}
+
+head(df.out)
+
+head(df2)
+
+#make a variable to link voyage ID with the imputation, which doens't have them
+df2 <- df2 %>% 
+  mutate(.id = row_number())
+
+RI.voyaged.id.df <- df2 |> filter(location=="Rhode Island") |> filter(.id %in% df.out$.id) |> select(voyage) |> unique()
+
+df |> filter(voyage_id %in% RI.voyaged.id.df$voyage)
+
+```
+

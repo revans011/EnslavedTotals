@@ -1,0 +1,353 @@
+---
+title: "slavevoyagesdata"
+format: html
+editor: source
+---
+
+
+ The webpage:
+ https://www.slavevoyages.org/voyage/about#methodology/imputing-numbers-of-slaves/14/en/
+ https://www.slavevoyages.org/voyage/about#methodology/imputed-variables/8/en/
+ https://www.slavevoyages.org/voyage/about#methodology/appendix/20/en/
+ 
+ The number of captives on board was very much a function of the type of ship as well as place of trade in Africa, and to a lesser extent in the Americas. Moreover, the size of the type of vessel as reflected in its rig changed over time. The Appendix table attempts to take into account these factors by showing average number of captives both embarked and disembarked for 155 separate combinations of first, rig of vessel and time period; and second, where these were not available, place of trade in Africa; and third, a separate grouping of 18 types of vessels – smaller than those from the rest of the Atlantic World before 1800 - built in North America. A small group of vessels have no information on either rig or place of trade and estimates of captives for these are classed as “No rig” in the Appendix table. 
+ 
+SO THE STRATA VARIABLES ARE:
+rig of vessel
+time period; and second, where these were not available, 
+place of trade in Africa; and third, 
+a separate grouping of 18 types of vessels – smaller than those from the rest of the Atlantic World before 1800 - built in North America. A small group of vessels have no information on either rig or place of trade and estimates of captives for these are classed as “No rig” in the Appendix table.
+
+All this is in the variable XMIMPFLAG
+
+
+
+Total slaves embarked	tslavesd	8,297	 
+Total slaves embarked IMP	slaximp	34,025
+
+```{r}
+df <- read.csv(here("data","Voyages-TSTD-May2023.csv"))
+
+
+goo <- df |> select(TSLAVESD,XMIMPFLAG) |> drop_na()
+
+goo$XMIMPFLAG <- as.factor(goo$XMIMPFLAG)
+
+goo |> group_by(XMIMPFLAG) |> summarize(mean = mean(TSLAVESD),
+                 median = median(TSLAVESD),
+                 diff = mean - median,
+                 N = n(),
+                 Nmean = N * mean,
+                 Nmed = N * median,
+                 difftot = Nmean-Nmed)
+
+
+
+goo |> group_by(XMIMPFLAG) |> summarise(mean = mean(TSLAVESD),
+                 median = median(TSLAVESD),
+                 diff = mean - median,
+                 N = n(),
+                 Nmean = N * mean,
+                 Nmed = N * median,
+                 difftot = Nmean-Nmed) |> ungroup() |>
+  summarize(totalmean = sum(Nmean),
+            totalmed = sum(Nmed),
+            NN = sum(N),
+            diff = totalmean-totalmed) # NN is the total from just over 8,000 voyages.
+
+# that is a difference in 28676, nearly 30,000 slave in 8000 voyages. We know the truth and the average is correct here becuase that is how math works.
+
+#====lookup table for means and medians
+
+lookup <- df|> select(TSLAVESD,XMIMPFLAG) |> drop_na() |> group_by(XMIMPFLAG) |> summarize(
+                 mean = mean(TSLAVESD),
+                 median = median(TSLAVESD)) |> ungroup()
+
+lookup
+#========== Now impute TSLAVSD using mean and median imputation for voyages that have XMIMPFLAG
+
+
+
+foo <- df |> select(XMIMPFLAG, TSLAVESD) |> drop_na(XMIMPFLAG)
+dim(foo)
+foo$XMIMPFLAG <- as.factor(foo$XMIMPFLAG)
+
+df_merged <- right_join(lookup,foo,by = "XMIMPFLAG")
+
+df_merged
+# now I have imputed values for nearly all the 35,000 voyages.
+# find the totals for mean and median
+
+df_merged |> summarise(
+  totmean = sum(mean, na.rm=TRUE),
+  totmedian = sum(median,na.rm=TRUE),
+  diff = totmean-totmedian,
+  ratio = totmean/totmedian
+)
+
+
+# this result is quite close for the overall
+
+
+
+#=======checks======
+
+
+goo |> summarise(N = sum(TSLAVESD))
+# that is 2742112	slaves on just over 8000 voyages. 
+
+mean(goo$TSLAVESD) * dim(goo)[1] # checks 
+
+# checks out
+
+goo |> group_by(XMIMPFLAG) |> summarise(
+                 mean = mean(TSLAVESD),
+                 N = n(),
+                 Nmean = N * mean)|> ungroup() |>
+  summarize(
+            tot = sum(Nmean)) # NN is the total from just over 8,000 voyages.
+
+
+#---------------------- tree
+
+foo <- df |> select(RIG,NATIONAL,EMBREG, TSLAVESD, YEAR10) |>  drop_na()
+
+
+library(rpart)
+library(rpart.plot)
+
+
+foo$DATEDEP
+names(foo)
+
+foo$RIG <- as.factor(foo$RIG)
+foo$NATIONAL <- as.factor(foo$NATIONAL)
+foo$EMBREG <- as.factor(foo$EMBREG)
+
+
+# Fit a regression tree
+fit <- rpart(TSLAVESD ~ ., data = foo, method = "anova")  # "anova" for regression
+
+summary(fit)
+# Plot the regression tree
+rpart.plot(fit, type = 3, fallen.leaves = TRUE)
+
+#write.csv(foo, here("data","foo.csv"))
+```
+
+
+
+
+-----------methods of imputation
+
+To impute missing values in a dataset like the one you’ve created (with a categorical variable X, a numeric variable Y, and some missing values—some jointly missing), several types of imputation methods can be used depending on your goals, assumptions, and tools available. Here’s a categorized overview:
+
+⸻
+
+1. Simple/Univariate Imputation Methods
+
+For Y (numeric):
+	•	Mean imputation: Replace missing Y with the mean of observed Y.
+	•	Median imputation: Replace missing Y with the median.
+	•	Hot-deck imputation: Replace Y with a randomly selected value from a similar case (e.g., same category in X).
+	•	Regression imputation: Predict Y using a linear model with X as a predictor.
+
+For X (categorical):
+	•	Mode imputation: Replace missing X with the most frequent category.
+	•	Hot-deck for categorical: Replace with a randomly selected observed value from a similar profile (e.g., based on Y).
+	•	Random sampling: Replace missing X with a random draw from observed distribution.
+
+⸻
+
+2. Multivariate Imputation
+
+Multiple Imputation by Chained Equations (MICE)
+	•	Iteratively models each variable with missing values conditioned on other variables.
+	•	Can handle mixed data types (X = categorical, Y = numeric).
+	•	Automatically handles interactions and nonlinearities better than simple regression.
+
+R Package: mice
+
+library(mice)
+imp <- mice(df, m = 5, method = c("", "polyreg", "pmm"), seed = 123)
+completed <- complete(imp)
+
+
+
+⸻
+
+3. Model-Based Imputation
+
+Bayesian Imputation
+	•	Draws from posterior distributions, explicitly modeling uncertainty.
+	•	Suitable when incorporating prior knowledge or hierarchical structure.
+
+R Packages: JointAI, brms, jomo
+
+Maximum Likelihood Estimation (MLE)
+	•	Used in expectation-maximization (EM) algorithms.
+	•	Often used for MAR (missing at random) mechanisms in latent variable models.
+
+⸻
+
+4. Machine Learning Methods
+
+For more flexible, nonlinear relationships:
+	•	Random Forest Imputation (e.g., missForest in R): good for mixed data types.
+	•	k-Nearest Neighbors (kNN) imputation: imputes based on similar rows.
+	•	XGBoost or lightGBM-based imputation: predictive models for imputation.
+
+⸻
+
+5. Deep Learning Methods
+	•	Autoencoders or Variational Autoencoders can be trained to reconstruct missing data in high-dimensional settings.
+	•	Often used in larger datasets.
+
+⸻
+
+6. Joint Modeling Approaches
+	•	Specify a joint distribution over X and Y (e.g., bivariate normal + multinomial) and impute using posterior draws.
+	•	Better for preserving inter-variable relationships (especially useful when both variables are missing).
+
+⸻
+
+When to Choose Which?
+
+Scenario	Recommended Methods
+Few missing values	Mean/Mode, Hot-deck
+MAR or MNAR assumptions	MICE, JointAI, Bayesian models
+Nonlinear relationships	missForest, kNN, XGBoost
+Mixed data types (X = factor)	MICE, missForest
+Complex structure or uncertainty	Bayesian Imputation, Joint Modeling
+Need multiple datasets	MICE, JointAI
+
+
+
+⸻
+
+Let me know if you’d like a demo with your df, e.g., MICE or missForest!
+
+```{r}
+#| label: setup
+#| echo: false
+#| include: false
+
+library(here)
+library(rjags)
+library(JointAI)
+library(tictoc)
+
+
+# Set global chunk options
+knitr::opts_chunk$set(
+  echo = FALSE,         # Show code by default
+  warning = FALSE,     # Hide warnings in the output
+  message = FALSE,     # Hide messages in the output
+  fig.width = 4,       # Default figure width
+  fig.height = 2.666,      # Default figure height
+  fig.align = "center" # Center align figures
+)
+
+# Set seed for reproducibility
+```
+
+```{r}
+set.seed(123)
+
+# Create ID column
+ID <- 1:100
+
+# Create X with 10 categories
+categories <- paste0("Cat", 1:10)
+X <- sample(categories, 100, replace = TRUE)
+
+# Correlate Y to X by assigning each category a mean
+category_means <- setNames(sample(50:100, 10), categories)
+Y <- rnorm(100, mean = category_means[X], sd = 5)
+Y <- round(Y)
+
+# Choose 3 indices where both X and Y will be missing
+both_missing_idx <- sample(1:100, 3)
+X[both_missing_idx] <- NA
+Y[both_missing_idx] <- NA
+
+# Select additional indices for X (5% total => 5 indices)
+# Avoid overlap with `both_missing_idx`
+remaining_X_missing <- setdiff(1:100, both_missing_idx)
+X_missing_idx <- sample(remaining_X_missing, 2)
+X[X_missing_idx] <- NA
+
+# Select additional indices for Y (10% total => 10 indices)
+remaining_Y_missing <- setdiff(1:100, both_missing_idx)
+Y_missing_idx <- sample(remaining_Y_missing, 7)
+Y[Y_missing_idx] <- NA
+
+# Create dataframe
+df <- data.frame(ID, X, Y)
+
+df$X <- as.factor(df$X)
+
+head(df, 30)
+```
+
+```{r}
+library(mice)
+imp <- mice(df, m = 200, method = c("", "polyreg", "pmm"), seed = 123, printFlag = FALSE)
+completed <- complete(imp,1)
+
+completed
+
+densityplot(imp, ~ Y)
+table(unlist(imp$imp$X))
+
+
+library(dplyr)
+
+# Stack all imputed datasets
+long <- complete(imp, action = "long", include = TRUE)
+
+# Count category frequencies in each imputation
+long %>%
+  filter(.imp != 0) %>%
+  group_by(.imp, X) %>%
+  tally() %>%
+  tidyr::pivot_wider(names_from = .imp, values_from = n, values_fill = 0)
+```
+```{r}
+# Stack all imputations including original data (.imp = 0)
+long_data <- complete(imp, action = "long", include = TRUE)
+
+# Choose an ID to inspect
+target_id <- 14
+
+# Print all imputed versions for the chosen ID
+long_data %>%
+  filter(ID == target_id) %>%
+  select(.imp, ID, X, Y) %>%
+  print()
+
+# Plot histogram of imputed Y values across imputations (excluding original)
+ggplot(
+  long_data %>% filter(.imp != 0, ID == target_id),
+  aes(x = Y)
+) +
+  geom_histogram(binwidth = 1, fill = "gray", color = "black") +
+  labs(
+    title = paste("Imputed Y Values for ID", target_id),
+    x = "Y",
+    y = "Count"
+  )
+
+# Plot bar chart of imputed X values across imputations (excluding original)
+ggplot(
+  long_data %>% filter(.imp != 0, ID == target_id),
+  aes(x = X)
+) +
+  geom_bar(fill = "steelblue") +
+  labs(
+    title = paste("Imputed X Values for ID", target_id),
+    x = "X Category",
+    y = "Count"
+  )
+```
+

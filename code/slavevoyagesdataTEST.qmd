@@ -1,0 +1,204 @@
+---
+title: "slavevoyagesdata"
+format: html
+editor: visual
+---
+```{r}
+#| label: setup
+#| echo: false
+#| include: false
+
+library(here)
+library(brms)
+
+
+# Set global chunk options
+knitr::opts_chunk$set(
+  echo = FALSE,         # Show code by default
+  warning = FALSE,     # Hide warnings in the output
+  message = FALSE,     # Hide messages in the output
+  fig.width = 4,       # Default figure width
+  fig.height = 2.666,      # Default figure height
+  fig.align = "center" # Center align figures
+)
+
+# Set seed for reproducibility
+```
+
+
+
+Now impute:
+
+From the uploaded dataset
+
+Write R code using the JointAI package for a bayesian model that is a multivariate approach to predict all the missing values in the dataset using all the variables as predictors for each other. Do not drop missing values.
+
+All the variables are correlated except voyage. "location" is character, and "arrived" and "purchased" are numeric.
+
+All the numeric variables are always positive, so predict positive numbers. 
+
+"location" is character data, and it has missing values that need to be predicted.
+
+display the results with tables summaries of the posterior distributions of the predicted values.
+
+Write the code in one chunk.
+
+
+
+Easy example and set install issues
+
+```{r}
+
+# remove.packages("rjags")
+# 
+# install.packages(
+#   "rjags",
+#   type = "source",
+#   configure.args = "--with-jags-include=/opt/homebrew/include --with-jags-lib=/opt/homebrew/lib"
+# )
+
+
+library(rjags)
+
+# model_string <- "model {
+#   for (i in 1:5) {
+#     y[i] ~ dnorm(0, 1)
+#   }
+# }"
+# 
+# mod <- jags.model(textConnection(model_string), data = list(y = rep(0, 5)), n.chains = 2)
+# samples <- coda.samples(mod, variable.names = "y", n.iter = 100)
+# summary(samples)
+# mod
+# 
+
+remove.packages("JointAI")
+
+install.packages("remotes")
+
+install.packages("JointAI")
+
+#install.packages("JointAI")
+library(JointAI)   
+
+
+# Load a known dataset with similar structure
+df <- data.frame(
+  purchased = c(100, 150, 200, NA, 180, NA, 220),
+  arrived = c(90, 140, 190, NA, 160,165, NA),
+  tonnage = c(300, 400, 500, 350, 450, 470, 520),
+  location = factor(c(NA, "South", "West", "North", "South", "West", "North"))
+)
+
+# Now run a single model
+imp_test <- lm_imp(
+  arrived ~ purchased + tonnage + location,
+  data = df,
+  trunc = list(purchased = c(0, 1000)),
+  monitor_params = c(imps = TRUE),
+  n.adapt = 500,
+  n.iter = 1000,
+  n.chains = 2,
+  seed = 123
+)
+
+
+imp_test$MCMC
+
+summary(imp_test)
+
+get_MIdat(imp_test, m = 5, seed = 123)
+
+```
+
+
+
+A harder example
+
+Write R code to make a sample dataframe.
+It should be 15 rows and 5 columns
+The first column is called voyage and it is the ID variable, from 1 to 15
+The second columns is called purchased and it is a positive integer
+The third column is called arrived and it is correlated to "purchased" but is less than "purchased". it is a positive integer
+The four column is called tonnage and it much larger than "purchased" and loosely correlated to it.
+The fifth column is called location with three values. location is correlated with "arrived" values
+
+
+
+
+I used this one 
+
+```{r}
+set.seed(123)
+
+# Create voyage IDs
+voyage <- 1:15
+
+# Assign locations with some clustering to simulate correlation with arrived
+location <- sample(c("A", "B", "C"), size = 15, replace = TRUE, prob = c(0.3, 0.4, 0.3))
+
+# Generate purchased: positive integers
+purchased <- sample(100:300, 15, replace = TRUE)
+
+# Generate location-based adjustments for "arrived"
+location_adjustment <- ifelse(location == "A", sample(10:30, 15, replace = TRUE),
+                        ifelse(location == "B", sample(15:35, 15, replace = TRUE),
+                                          sample(20:40, 15, replace = TRUE)))
+
+# Generate arrived: slightly lower than purchased with location-based effect
+arrived <- purchased - location_adjustment
+arrived <- pmax(arrived, 1)  # ensure positivity
+
+# Generate tonnage: much larger than purchased, loosely correlated
+tonnage <- round(purchased * runif(15, 2.5, 4) + rnorm(15, mean = 0, sd = 50))
+
+# Assemble into a dataframe
+df <- data.frame(
+  voyage = voyage,
+  purchased = purchased,
+  arrived = arrived,
+  tonnage = tonnage,
+  location = as.factor(location)
+)
+
+
+cor(df$purchased,df$arrived)
+table(df$location)
+df
+```
+
+
+now add some missing
+```{r}
+
+df[1,2] <- NA
+df[2,3] <- NA
+df[3,5] <- NA
+
+df
+
+```
+
+predict
+
+```{r}
+# Now run a single model
+imp_test <- lm_imp(
+  arrived ~ purchased + tonnage + location,
+  data = df,
+  trunc = list(purchased = c(0, 1000)),
+  monitor_params = c(imps = TRUE),
+  n.adapt = 500,
+  n.iter = 1000,
+  n.chains = 2,
+  seed = 123
+)
+
+
+imp_test$MCMC
+
+summary(imp_test)
+
+get_MIdat(imp_test, m = 5, seed = 123)
+```
+

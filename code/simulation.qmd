@@ -1,0 +1,449 @@
+---
+title: "Analysis"
+date: "`r Sys.Date()`"
+author: "Rich Evans, PhD, PSTAT"
+format: pdf
+number-sections: true
+execute: 
+  echo: false
+---
+
+
+
+
+```{r}
+#| label: setup
+#| echo: false
+#| include: false
+
+library(here)
+
+
+# Set global chunk options
+knitr::opts_chunk$set(
+  echo = FALSE,         # Show code by default
+  warning = FALSE,     # Hide warnings in the output
+  message = FALSE,     # Hide messages in the output
+  fig.width = 4,       # Default figure width
+  fig.height = 2.666,      # Default figure height
+  fig.align = "center" # Center align figures
+)
+
+# Set seed for reproducibility
+```
+
+```{r}
+#| label: read-data
+#| include: false
+#| eval: false
+
+df <- readxl::read_xlsx(here("data","re.xlsx"), na = c("NF", "NA", "N/A"))
+
+df <- clean_names(df)
+
+skim(df)
+
+#---------------------------multiple sheets----------------------------
+
+df_list = here("data","Katie_Final_Data_Collection_Tables.xlsx") %>% 
+  excel_sheets() %>% 
+  purrr::set_names() %>% 
+    map(~ read_excel(path = here("data","Katie_Final_Data_Collection_Tables.xlsx"), sheet = .x, na = c("N/A", "Missing")))
+
+
+df_list <- lapply(df_list,clean_names)
+
+remove_na_columns <- function(df) {
+  df[, colSums(is.na(df)) == 0]
+}
+
+# Apply the function to each dataframe in the list to remove empty columns
+df_list_cleaned <- lapply(df_list, remove_na_columns)
+
+```
+
+
+This generates practice data. The idea is that the number of "New" rows come from a prior on the number of unknown slave ships
+
+we have three kinds of data. 
+
+1. we know of the voyage AND the count of slaves on the ship
+
+2. we know of the voyage BUT NOT the count of slaves on the ship
+
+3. Voyages that we do know know of, but assume must exist. For some places we might believe this is zero, such as for some particular small port in New England. Note this is for Trans-atlantic voyages. It is certainly the case the coastal ship may have transported small numbers of slaves up and down the coast of North America. It would be hard to keep track of a single slave aboard a small schooner.
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+
+# Set seed for reproducibility (optional)
+set.seed(123)
+
+# Function to estimate the number of new rows (S)
+estimate_S <- function(dist = "poisson", lambda_s2 = NULL, size_s2 = NULL, prob_s2 = NULL, n_sim = 10000) {
+  # Generate S based on the selected discrete distribution
+  if (dist == "poisson") {
+    if (is.null(lambda_s2)) stop("For Poisson distribution, lambda_s2 must be specified.")
+    S_samples <- rpois(n_sim, lambda_s2)
+  } else if (dist == "negative_binomial") {
+    if (is.null(size_s2) || is.null(prob_s2)) stop("For Negative Binomial, size_s2 and prob_s2 must be specified.")
+    S_samples <- rnbinom(n_sim, size = size_s2, prob = prob_s2)
+  } else {
+    stop("Invalid distribution choice. Use 'poisson' or 'negative_binomial'.")
+  }
+  
+  # Estimate median
+  S_estimate <- median(S_samples)
+  
+  # Print result
+  cat("Estimated number of new rows (S):", S_estimate, "\n")
+  
+  return(round(S_estimate))  # Round to ensure an integer value
+}
+
+# Define the number of original rows
+## this is the sample size of the known voyages
+### that is the number of known voyages for this sumulation
+num_original_rows <- 30
+
+# Estimate the number of new rows using Poisson distribution (modify lambda_s2 as needed)
+num_new_rows <- estimate_S(dist = "poisson", lambda_s2 = 20)  # Adjust lambda_s2 as needed
+
+# Define possible values for the 'rig' column
+rig_types <- c("Ship", "Schooner", "Brig", "Sloop", "Barque")
+
+# Generate the dataset with 30 original rows
+voyage_data <- tibble(
+  voyageId = 1:num_original_rows,
+  numEnslaved = sample(50:500, num_original_rows, replace = TRUE),
+  tonnage = sample(100:600, num_original_rows, replace = TRUE),
+  rig = sample(rig_types, num_original_rows, replace = TRUE),
+  year = sample(1700:1865, num_original_rows, replace = TRUE),
+  rowType = "Original"
+)
+
+# Introduce 30% missing values in numEnslaved for original rows
+missing_indices <- sample(1:num_original_rows, size = round(0.3 * num_original_rows), replace = FALSE)
+voyage_data$numEnslaved[missing_indices] <- NA
+
+# Create new empty rows based on estimated S
+if (num_new_rows > 0) {
+  empty_rows <- tibble(
+    voyageId = (num_original_rows + 1):(num_original_rows + num_new_rows),
+    numEnslaved = rep(NA, num_new_rows),
+    tonnage = rep(NA, num_new_rows),
+    rig = rep(NA, num_new_rows),
+    year = rep(NA, num_new_rows),
+    rowType = "New"
+  )
+  
+  # Combine both datasets
+  voyage_data <- bind_rows(voyage_data, empty_rows)
+}
+
+# Print the dataset
+print(voyage_data)
+```
+
+
+
+
+
+
+```{r}
+# Load necessary library
+library(mice)
+
+# Perform multiple imputation using mice (Predictive Mean Matching)
+imputed_data <- mice(voyage_data, method = "pmm", m = 5, seed = 123)
+
+# Extract the first complete dataset after imputation
+voyage_data_complete <- complete(imputed_data, 1)
+
+# Print the updated dataset
+print(voyage_data_complete)
+```
+
+
+
+To develop a meaningful prior distribution for the unknown count of Middle Passage slave ships arriving at a specific port in the West Indies, you’ll want a structured approach that systematically incorporates historical knowledge, expert insights, and relevant uncertainty.
+
+Here’s a step-by-step Bayesian approach tailored specifically to this historical context:
+
+Step 1: Clarify the Definition and Historical Context
+
+Clearly define the historical parameter of interest:
+	•	Definition:
+Let X represent the discrete and unknown number of slave ships that arrived at the particular port within a defined historical period (e.g., annually between 1700-1800).
+	•	Historical Context:
+Historical scholarship suggests variability across ports due to economic demand, geopolitical shifts, legal regulations, warfare, and naval enforcement activities. All these factors influenced the frequency of arrivals.
+
+⸻
+
+Step 1: Define the Support and Distribution Type
+
+Since your variable is a discrete count (non-negative integer), suitable prior distributions might include:
+	•	Poisson (for counts, if no clear upper bound and arrivals are assumed independent events)
+	•	Negative Binomial (if overdispersion or variability is expected)
+	•	Binomial (if a fixed total number of voyages is known or assumed, but only their distribution among ports is unknown)
+
+Given historical uncertainty, the Poisson distribution is generally appropriate as a starting point:
+
+X \sim \text{Poisson}(\lambda)
+
+where \lambda is the unknown arrival rate parameter you must specify a prior for.
+
+⸻
+
+Step 2: Eliciting Historical Information and Expert Opinion
+
+Identify sources of evidence to inform your prior:
+	•	Archival Records:
+Port customs documents, shipping registers, trade ledgers, naval logs, insurance records, or colonial administration records.
+	•	Historians and Experts:
+Consult experts in the Transatlantic Slave Trade Database (Voyages), Caribbean history scholars, or maritime historians.
+	•	Analogous Ports:
+Data or estimates from similar ports can help estimate plausible ranges.
+
+⸻
+
+Step 2: Structuring the Expert Elicitation
+
+Ask historians structured questions, such as:
+	•	What was the typical range (minimum/maximum) of ship arrivals per year at ports similar in size and status?
+	•	How likely is it that fewer than 10 ships would arrive per year? 20 ships? 50 ships?
+	•	Can experts identify a most likely value or range?
+
+Translate their qualitative responses into quantitative intervals or probability distributions.
+
+For example, an expert may say:
+	•	“Typically, such ports received around 5 to 20 ships per year, with 10 being common, though in peak years, arrivals might reach 40.”
+
+⸻
+
+Step 2: Translating Expert Knowledge into Parameters (elicitation):
+
+Based on expert elicitation or historical analogy, you might have something like:
+	•	Lower plausible bound: ~1-3 ships (minimal scenario).
+	•	Most likely (modal) scenario: about 10-15 ships per year.
+	•	Upper plausible bound: perhaps 30-50 ships in exceptional circumstances.
+
+⸻
+
+Step 2: Specifying a prior distribution
+
+Use this historical information to estimate parameters. A Gamma prior for the Poisson rate parameter (\lambda) is mathematically convenient (conjugate):
+
+\lambda \sim \text{Gamma}(a, b)
+
+The Gamma distribution has parameters (\alpha, \beta):
+	•	Mean: \frac{\alpha}{\beta}
+	•	Mode (most likely value): \frac{\alpha - 1}{\beta} for \alpha > 1.
+
+Choose \alpha and \beta to match expert-derived values:
+	•	Suppose the expert consensus is that a typical annual arrival is around 10 ships, with plausible variation from 5 to 20. A Gamma(\alpha=10, \beta=1) prior would have mean 10 and variance 10, giving sufficient uncertainty:
+
+\lambda \sim \text{Gamma}(10, 1) \quad (\text{mean} = 10, \text{variance} = 10)
+
+The resulting prior predictive distribution (the number of ships) is then Negative Binomial, reflecting the uncertainty in \lambda.
+
+⸻
+
+Step 3: Prior Predictive Checking (Optional)
+	•	Simulate from the prior predictive distribution and verify that outcomes align with historical expectations:
+	•	Generate counts and ensure values reflect realistic historical scenarios (e.g., primarily between 5 and 20, rarely exceeding 50).
+
+⸻
+
+Final Recommendations:
+	•	Clearly document your assumptions and expert elicitation methods.
+	•	Specify explicitly why you chose particular parameter values for transparency.
+	•	If uncertainty or disagreement exists among experts, consider sensitivity analyses with alternative priors to gauge robustness.
+
+⸻
+
+Example of final prior specification (summarized):
+	•	Prior belief:
+\lambda \sim \text{Gamma}(\alpha=10, \beta=1) \quad\rightarrow\quad \text{E}(\lambda)=10, \quad\text{Var}(\lambda)=10
+	•	Likelihood model for observed count:
+X|\lambda \sim \text{Poisson}(\lambda)
+	•	Resulting prior predictive distribution (marginally):
+X \sim \text{NegBinomial}(r=10, p=0.5)
+
+This structure ensures clarity, transparency, and incorporates rigorous historical evidence and expert input to produce a plausible, historically grounded prior.
+
+
+------transforming experts estimates to negative binomial parameters
+
+To transform expert judgments—specifically, their estimates of a typical (modal) number of slave ships arriving per period and their plausible ranges—into parameters for a Negative Binomial prior predictive distribution, you follow a structured Bayesian approach. Here’s a clear step-by-step method:
+
+⸻
+
+Step-by-step approach:
+
+Step 1: Expert Input and Interpretation
+
+Let’s assume your historical experts provide the following information:
+	•	Mode (most likely number of ships arriving): m
+	•	Likely range: defined as a credible interval (e.g., “experts are 90% sure the annual number of ships lies between L (lower bound) and U (upper bound).
+
+For illustration, say:
+	•	Mode: m = 12 ships/year
+	•	Likely (90%) interval: approximately 5 to 25 ships per year
+
+Step 2: Translate Expert Estimates into Gamma Prior for the Poisson Rate
+
+You’re modeling the number of ships (X) as:
+
+X|\lambda \sim \text{Poisson}(\lambda), \quad \lambda \sim \text{Gamma}(\alpha, \beta)
+
+This setup implies a Negative Binomial prior predictive distribution for X:
+
+X \sim \text{NegativeBinomial}(r=\alpha, p=\frac{\beta}{\beta+1})
+
+The parameters \alpha and \beta of the Gamma distribution control the shape and scale. They can be expressed as:
+	•	Mean of the Gamma distribution:
+\text{Mean} = \frac{\alpha}{\beta}
+	•	Mode of the Gamma distribution (for \alpha > 1):
+\text{Mode} = \frac{\alpha - 1}{\beta}
+	•	Variance of the Gamma distribution:
+\text{Var} = \frac{\alpha}{\beta^2}
+
+Step 2: Matching Mode and Range to Find Gamma Parameters
+
+You have two equations and two unknowns, \alpha and \beta. Typically, you’d use the mode and a credible interval from experts to estimate these parameters.
+
+Using Mode:
+
+Given the expert-provided mode m:
+
+m = \frac{\alpha - 1}{\beta} \quad \Rightarrow \quad \alpha - 1 = m\beta \quad \Rightarrow \quad \alpha = m\beta + 1
+
+Using Credible Interval (90% range):
+
+Let the experts provide a credible range for \lambda, say a lower quantile q_{\text{low}} and an upper quantile q_{\text{high}}, and suppose they believe with 90% certainty \lambda lies between these bounds. Then:
+
+P(q_{\text{low}} \leq \lambda \leq q_{\text{high}}) = 0.90
+
+You have two equations:
+
+F_{\text{Gamma}}(q_{\text{low}}; \alpha, \beta) = 0.05, \quad F_{\text{Gamma}}(q_{\text{high}}) = 0.95
+
+where F_{\text{Gamma}} is the cumulative distribution function (CDF) of the Gamma distribution.
+
+Using numeric solvers (e.g., R’s optim, stats::qgamma), you can solve for \alpha and \beta numerically given the mode m and the credible interval endpoints.
+
+⸻
+
+Step 2 Example (Numeric):
+
+Suppose your historical experts suggest the following (hypothetically):
+	•	Mode: 12 ships/year
+	•	90% credible interval: [5, 25] ships/year for the Poisson rate \lambda.
+
+You’d find \alpha and \beta by numerically solving the following equations simultaneously:
+	•	Mode equation:
+\frac{\alpha - 1}{\beta} = m
+	•	Credible interval equations:
+F_{\text{Gamma}}(q_{\text{low}}, \alpha, \beta) = 0.05, \quad F_{\text{Gamma}}(q_{\text{high}}) = 0.95
+
+Software (e.g., R) simplifies this step:
+
+# Example R code to solve numerically:
+mode <- 10  # expert mode estimate
+low_q <- 5  # 5th percentile (lower bound of interval)
+high_q <- 25  # 95th percentile (upper bound of interval)
+
+objective_function <- function(params) {
+  alpha <- params[1]
+  beta <- params[2]
+  
+  mode_error <- ((alpha - 1)/beta - mode)^2
+  low_error <- (qgamma(0.05, shape=alpha, rate=beta) - low_q)^2
+  high_q_error <- (qgamma(0.95, shape=alpha, rate=beta) - high_q)^2
+  
+  mode_error + low_q + high_q
+}
+
+# initial guess:
+init_params <- c(10, 1)
+
+# Solve numerically (in R):
+optim(init_params, objective_function)
+
+This procedure returns estimates for \alpha and \beta.
+
+⸻
+
+Step 3: Obtaining Negative Binomial Parameters
+
+After specifying your Gamma(\alpha, \beta) prior for \lambda, the prior predictive distribution for the number of ships (X) is Negative Binomial with parameters:
+	•	r = \alpha (shape)
+	•	p = \frac{\beta}{\beta + 1} (probability of success)
+
+Thus, you have:
+
+X \sim \text{NegBinomial}(r=\alpha, p=\frac{\beta}{\beta + 1})
+
+From these two parameters, the Negative Binomial distribution has:
+	•	Mean:
+E[X] = r\frac{1-p}{p} = \frac{\alpha}{\beta}
+	•	Variance:
+\text{Var}(X) = \frac{\alpha(\beta + 1)}{\beta^2}
+
+⸻
+
+Step 4: Check Prior Predictive Distribution
+	•	Draw samples from your Negative Binomial prior and verify the distribution matches expert knowledge.
+	•	Adjust parameters if necessary based on experts’ feedback.
+
+⸻
+
+Summary of Transformation:
+
+Expert Information	Step-by-Step Procedure to Parameter Estimates
+Mode (m), Credible Interval [q_{\text{low}}, q_{\text{high}}] for \lambda	Solve numerically for Gamma parameters (\alpha,\beta) to match expert mode and credible intervals.
+Gamma parameters (\alpha, \beta) derived numerically	Negative Binomial parameters: r=\alpha, p=\frac{\beta}{\beta+1}.
+
+
+
+⸻
+
+Final Note:
+The key step here is numerically solving the system of equations for the Gamma parameters using your expert-provided mode and credible intervals. This ensures your prior aligns robustly with historical expertise and uncertainty.
+
+
+
+
+
+## Stats write up
+
+
+
+## Software References
+
+
+```{r}
+
+# Get and print pwr package version
+pwr_version <- as.character(packageVersion("pwr"))
+cat("pwr package version:", pwr_version, "\n")
+
+# Get citation for pwr without BibTeX output
+pwr_citation <- citation("pwr")
+print(pwr_citation, style = "text")  # Suppresses BibTeX
+
+cat("\n\n")
+
+# Get and print R version
+r_version <- as.character(getRversion())
+cat("R version:", r_version, "\n")
+
+# Get citation for R without the extra message or BibTeX
+r_citation <- citation()
+print(r_citation, style = "text")  # Suppresses extra messages and BibTeX
+```
+
+
+**End of Document**

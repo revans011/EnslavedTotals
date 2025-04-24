@@ -1,0 +1,439 @@
+---
+title: "slavevoyagesdata"
+format: html
+editor: visual
+---
+```{r}
+#| label: setup
+#| echo: false
+#| include: false
+
+library(here)
+library(mice)
+
+
+# Set global chunk options
+knitr::opts_chunk$set(
+  echo = FALSE,         # Show code by default
+  warning = FALSE,     # Hide warnings in the output
+  message = FALSE,     # Hide messages in the output
+  fig.width = 4,       # Default figure width
+  fig.height = 2.666,      # Default figure height
+  fig.align = "center" # Center align figures
+)
+
+# Set seed for reproducibility
+```
+
+
+```{r}
+#from website with filter: Principal place where captives were landed -> Rhode Island
+
+load(here("data","DCSTVoyages.RData"))
+
+slaveVoy_df <- read.xlsx(here("data","fromWebsitefilterRhodeIsland.xlsx"))
+
+
+df %>%
+  select(where(~ any(grepl("north america", .x, ignore.case = TRUE)))) %>%
+  names()
+
+unique(DCSTVoyages$First_region_of_slave_landing)
+
+us_states_from_list <- c(
+  "Florida", "Georgia", "Maryland", "Virginia", "New York",
+  "South Carolina", "Rhode Island", "Pennsylvania", "North Carolina",
+  "New Jersey", "New Hampshire", "Massachusetts", "Connecticut", "Maine"
+)
+
+us_states_from_list <- c(
+  "New York",
+  "Rhode Island", "Pennsylvania",
+  "New Jersey", "New Hampshire", "Massachusetts", "Connecticut", "Maine"
+)
+
+```
+
+select only the variables important for imputation
+
+```{r}
+
+df <- DCSTVoyages  |> filter(First_region_of_slave_landing %in% us_states_from_list) |>
+  select(
+    voyage_id
+    , Year_of_arrival
+    , imputed_Year_of_arrival_at_port_of_disembarkation
+    #vessel attributes
+    , Name_of_the_vessel
+    , Rig_of_vessel
+    , Tonnage_standardized_on_British_measured_tons_1773_1835
+    , Tonnage_of_the_vessel
+    , Place_where_vessel_constructed
+    
+    #purchase location
+    , Principal_place_of_slave_purchase
+    #, Imputed_principal_place_of_slave_purchase
+    
+    #embark
+    , Total_slaves_purchased
+    #, Imputed_total_slaves_embarked
+    
+     #disembark
+    , Total_slaves_arrived_at_first_port_of_disembarkation
+    #, Imputed_total_slaves_disembarked
+    
+      #disembark region
+    , First_region_of_slave_landing
+    , Principal_port_of_slave_disembarkation
+   # , Imputed_principal_port_of_slave_disembarkation
+    , First_place_of_slave_landing
+    , Place_at_which_voyage_ended
+    , First_intended_port_of_disembarkation
+
+  )
+
+
+
+
+```
+
+
+Now impute
+
+```{r}
+md.pattern(df |> sample_n(100))
+
+
+
+
+
+#df<- df |> sample_n(1000)
+
+init <- mice(df, maxit = 0)
+
+# Copy the default methods vector
+methods <- init$method
+
+# Now set methods using a named vector
+methods[c("Year_of_arrival", 
+          "Tonnage_of_the_vessel", 
+          "Tonnage_standardized_on_British_measured_tons_1773_1835",
+          "Total_slaves_purchased", 
+          "Total_slaves_arrived_at_first_port_of_disembarkation")] <- "pmm"
+
+# Run imputation
+imp <- mice(df, method = methods, m = 5, seed = 42)
+
+
+imp$loggedEvents
+# View summary of the imputed data
+summary(imp)
+
+
+
+#-----------------
+
+# 1. Grab defaults
+init    <- mice(df, maxit = 0)
+methods <- init$method
+post    <- init$post
+
+# 2. Switch these to pmm
+vars_to_pmm <- c(
+  "Year_of_arrival",
+  "Tonnage_of_the_vessel",
+  "Tonnage_standardized_on_British_measured_tons_1773_1835",
+  "Total_slaves_purchased",
+  "Total_slaves_arrived_at_first_port_of_disembarkation"
+)
+methods[vars_to_pmm] <- "pmm"
+
+# 3. Post‐processing hook for Total_slaves_purchased:
+#    - `where[, var]` marks the rows that were *missing* and just got imputed
+#    - we only update those entries where arrivals aren’t NA
+post["Total_slaves_purchased"] <- "
+  var <- 'Total_slaves_purchased'
+  # which rows were missing originally
+  miss_idx <- which(where[, var])
+  # the newly imputed (plus any observed) values at those rows
+  imputed_vals <- data[miss_idx, var]
+  # the arrivals at those same rows
+  arrivals     <- data[miss_idx, 'Total_slaves_arrived_at_first_port_of_disembarkation']
+  # only enforce where arrivals exist
+  ok <- !is.na(arrivals)
+  # bump the imputed purchase up so it's > arrivals
+  imp$imp[[var]][ok, j] <- pmax(imputed_vals[ok], arrivals[ok] + 1)
+"
+
+# 4. Run mice with our custom methods & post
+imp <- mice(
+  df,
+  method = methods,
+  post   = post,
+  m      = 5,
+  seed   = 42
+)
+
+# 5. Check logs & summary
+imp$loggedEvents
+summary(imp)
+```
+
+
+```{r}
+# 2. Create example data with some NAs
+df <- data.frame(
+  age   = c(25, 37, NA, 50, 29),
+  sex   = factor(c("M", NA, "F", "F", "M")),
+  score = c(88, 92, NA, NA, 85)
+)
+
+# 3. Inspect missingness
+md.pattern(df)
+
+## 3) initialize to get defaults
+ini <- mice(df, maxit = 0, print = FALSE)
+
+# 4) tweak methods & predictors
+meth <- ini$method
+pred <- ini$predictorMatrix
+
+#   • use PMM for both numeric vars, logistic for the factor
+meth["age"]   <- "pmm"
+meth["score"] <- "pmm"
+meth["sex"]   <- "logreg"
+
+#   • (optional) only use age to impute score:
+pred["score", "sex"] <- 0
+
+# 5) set up a “post‐processing” rule for score
+post <- ini$post
+post["score"] <- "
+  # after each iteration, for any row where score <= age,
+  # bump score to age + 1
+  imp[[j]][, i] <- ifelse(
+    imp[[j]][, i] <= imp[[j]][, 'age'],
+    imp[[j]][, 'age'] + 1,
+    imp[[j]][, i]
+  )
+"
+
+# 6) run the imputations
+imp <- mice(
+  data            = df,
+  method          = meth,
+  predictorMatrix = pred,
+  post            = post,
+  m               = 5,
+  seed            = 123
+)
+
+# 7) grab one completed dataset
+completed1 <- complete(imp, action = 1)
+
+# 8) inspect
+print(completed1)
+
+
+#---------------
+
+library(Amelia)
+
+# 1) original data
+df <- data.frame(
+  age   = c(25, 37, NA, 50, 29),
+  sex   = factor(c("M", NA, "F", "F", "M")),
+  score = c(88, 92, NA, NA, 85)
+)
+
+# 2) create diff = score - age, and drop score
+df2 <- transform(df, diff = score - age)
+df2$score <- NULL
+
+# 3) impute with bounds but only use noms="sex"
+a.out <- amelia(
+  df2,
+  m    = 5,
+  noms = "sex",                                # impute sex as a nominal var
+  bounds = rbind(
+    c(which(names(df2)=="diff"), 0, Inf)       # enforce diff ≥ 0
+  )
+)
+
+# 4) sanity‐check how many imputations you got
+length(a.out$imputations)
+#> [1] 5
+
+# 5) rebuild your completed datasets
+completed <- lapply(a.out$imputations, function(dat) {
+  dat$score <- dat$diff + dat$age
+  dat[, c("age","sex","score")]
+})
+
+# 6) now inspect the first one:
+completed[[1]]
+#--------------------------
+
+library(smcfcs)
+
+# your data
+df <- data.frame(
+  age   = c(25, 37, NA, 50, 29),
+  sex   = factor(c("M", NA, "F", "F", "M")),
+  score = c(88, 92, NA, NA, 85)
+)
+
+# one element per column: "" for variables you want smcfcs to handle (including the outcome)
+meth <- c(
+  "norm",    # age   — impute via normal regression
+  "logreg",  # sex   — impute via logistic regression
+  ""         # score — leave blank so smcfcs uses the lm model for score
+)
+
+imp <- smcfcs(
+  originaldata = df,
+  smtype       = "lm",
+  smformula    = score ~ age + sex,
+  method       = meth,
+  m            = 5,
+  numit        = 10
+)
+
+# pull out the completed datasets
+completed_list <- imp$impDatasets
+completed_list[[1]]
+
+
+```
+
+
+
+```{r}
+library(jomo)
+
+df2 <- data.frame(
+  school = rep(1:3, each=4),
+  student = 1:12,
+  score1  = c(NA, 80, 75, 90,  85, NA, 88, 92,  NA, 70, 65, 78),
+  score2  = c(60, NA, 78, 85,  NA, 82, 80, 87,  70, NA, 68, 75)
+)
+
+# two-level: Y = incomplete outcomes; X = fully observed covariates (none here)
+imp2 <- jomo1ran(
+  Y        = df2[c("score1","score2")],
+  clus     = df2$school,   # clustering variable
+  nburn    = 200,
+  nbetween = 50,
+  nimp     = 5
+)
+
+imp2
+
+completed2 <- jomoImpute.complete(imp2)
+completed2[[1]]
+
+```
+
+
+
+now calculate the distribution of the imputed totals
+```{r}
+
+# Convert mids object to long format
+imp_long <- complete(imp, action = "long", include = TRUE)
+
+# Now summarize
+imp_long |> filter(voyage_id %in% slaveVoy_df$Voyage.ID) |>
+  group_by(.imp) |>
+  summarise(
+    tot = sum(Total_slaves_arrived_at_first_port_of_disembarkation, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+```
+
+
+Now compare the distribution of the imputed totals to the totals from the website
+
+```{r}
+
+```
+
+
+-------------------------------------------------------e
+
+```{r}
+
+
+## merge the two sets to compare variables
+
+# df_merged <- df |> left_join(slaveVoy_df, by = c("voyage_id" = "Voyage.ID"))
+# 
+# df_merged_no_impute <- df_merged |> select(-contains("Impute")) 
+# 
+# names(df_merged_no_impute)
+
+```
+
+
+```{r}
+df2 <- DCSTVoyages |> select(c(
+  "voyage_id",
+  "Year_of_arrival",
+  "Name_of_the_vessel",
+  "Rig_of_vessel",
+  "Tonnage_standardized_on_British_measured_tons_1773_1835",
+  "Tonnage_of_the_vessel",
+  "Place_where_vessel_constructed",
+  "Principal_place_of_slave_purchase",
+  "Total_slaves_purchased",
+  "Total_slaves_arrived_at_first_port_of_disembarkation",
+  "First_region_of_slave_landing",
+  "Principal_port_of_slave_disembarkation",
+  "First_place_of_slave_landing",
+  "Place_at_which_voyage_ended",
+  "First_intended_port_of_disembarkation"
+))
+
+write.csv(df2|>slice(1:50),here("data","forimp.csv"))
+```
+
+
+```{r}
+
+# Check missing data pattern
+md.pattern(df2 |> sample_n(1000))
+
+# Initialize with maxit = 0 to inspect the default method
+init <- mice(df2, maxit = 0)
+
+# Copy the default methods vector
+methods <- init$method
+
+# Now set methods using a named vector
+methods[c("Year_of_arrival", 
+          "Tonnage_standardized_on_British_measured_tons_1773_1835", 
+          "Tonnage_of_the_vessel", 
+          "Total_slaves_purchased", 
+          "Total_slaves_arrived_at_first_port_of_disembarkation")] <- "pmm"
+
+# Optionally: assign "polyreg" or "logreg" to factor variables
+methods["Principal_place_of_slave_purchase"] <- "polyreg"
+
+# Run imputation
+imp <- mice(df2, method = methods, m = 5, seed = 42)
+
+# View summary of the imputed data
+summary(imp)
+
+# Get one completed dataset (e.g., the first one)
+completed_df <- complete(imp, 1)
+
+
+glimpse(df2)
+
+library(missRanger)
+df_imp <- missRanger(df2, pmm.k = 3)
+
+```
+
