@@ -25,37 +25,17 @@ All this is in the variable XMIMPFLAG
 Total slaves embarked	tslavesd	8,297	 
 Total slaves embarked IMP	slaximp	34,025
 
+
+
+```{r}
+library(rpart)
+library(rpart.plot)
+```
+
+
 ```{r}
 df <- read.csv(here("data","Voyages-TSTD-May2023.csv"))
 
-
-goo <- df |> select(TSLAVESD,XMIMPFLAG) |> drop_na()
-
-goo$XMIMPFLAG <- as.factor(goo$XMIMPFLAG)
-
-goo |> group_by(XMIMPFLAG) |> summarize(mean = mean(TSLAVESD),
-                 median = median(TSLAVESD),
-                 diff = mean - median,
-                 N = n(),
-                 Nmean = N * mean,
-                 Nmed = N * median,
-                 difftot = Nmean-Nmed)
-
-
-
-goo |> group_by(XMIMPFLAG) |> summarise(mean = mean(TSLAVESD),
-                 median = median(TSLAVESD),
-                 diff = mean - median,
-                 N = n(),
-                 Nmean = N * mean,
-                 Nmed = N * median,
-                 difftot = Nmean-Nmed) |> ungroup() |>
-  summarize(totalmean = sum(Nmean),
-            totalmed = sum(Nmed),
-            NN = sum(N),
-            diff = totalmean-totalmed) # NN is the total from just over 8,000 voyages.
-
-# that is a difference in 28676, nearly 30,000 slave in 8000 voyages. We know the truth and the average is correct here becuase that is how math works.
 
 #====lookup table for means and medians
 
@@ -63,18 +43,19 @@ lookup <- df|> select(TSLAVESD,XMIMPFLAG) |> drop_na() |> group_by(XMIMPFLAG) |>
                  mean = mean(TSLAVESD),
                  median = median(TSLAVESD)) |> ungroup()
 
-lookup
+
 #========== Now impute TSLAVSD using mean and median imputation for voyages that have XMIMPFLAG
 
 
 
 foo <- df |> select(XMIMPFLAG, TSLAVESD) |> drop_na(XMIMPFLAG)
 dim(foo)
-foo$XMIMPFLAG <- as.factor(foo$XMIMPFLAG)
 
+
+# imputation step
 df_merged <- right_join(lookup,foo,by = "XMIMPFLAG")
 
-df_merged
+
 # now I have imputed values for nearly all the 35,000 voyages.
 # find the totals for mean and median
 
@@ -86,43 +67,82 @@ df_merged |> summarise(
 )
 
 
-# this result is quite close for the overall
+```
+
+that result is quite close for the overall but what about specific routes or times? Might some vary more?
+
+check one that has a big differecne for meanns and median
+
+```{r}
+lookup |> mutate(diff = mean-median) |> arrange(diff)
+
+# xmimplflag 135 has a big differnce
+
+```
 
 
+```{r}
+df_merged |> filter(XMIMPFLAG==135) |> summarise(
+  totmean = sum(mean, na.rm=TRUE),
+  totmedian = sum(median,na.rm=TRUE),
+  diff = totmean-totmedian,
+  ratio = totmean/totmedian
+)
 
-#=======checks======
+```
+
+This is a huge difference in estimation, for xmimpflag = 135, also called "No rig, 1826-50"
+
+It has 
+```{r}
+df |> filter(XMIMPFLAG==135) |> select(VOYAGEID,RIG, XMIMPFLAG,TSLAVESD) |> summary()
+```
+
+```{r}
+df |> select(VOYAGEID, XMIMPFLAG,TSLAVESD,YEARDEP) |> filter(YEARDEP<= 1850 & YEARDEP>=1820)
+  left_join(lookup,by = "XMIMPFLAG")|> summarise(
+  totmean = sum(mean, na.rm=TRUE),
+  totmedian = sum(median,na.rm=TRUE),
+  diff = totmean-totmedian,
+  ratio = totmean/totmedian
+)
+  
+  
+df |> select(VOYAGEID, XMIMPFLAG,TSLAVESD,YEARDEP, MJSELIMP1) |> filter(YEARDEP<= 1850 & YEARDEP>=1810) |> filter( MJSELIMP1==20000) |>
+  ggplot(aes(x = TSLAVESD)) +
+  geom_histogram()
+
+df |> select(VOYAGEID, XMIMPFLAG,TSLAVESD,YEARDEP, MJSELIMP1) |> filter(YEARDEP<= 1850 & YEARDEP>=1810) |> filter( MJSELIMP1==20000) |>
+  summary()
+
+#year 1807 british ban slave trade, MJSELIMP1==20000 is mainland north america
+
+df |> select(VOYAGEID, XMIMPFLAG,TSLAVESD,YEARDEP, MJSELIMP1) |> filter(YEARDEP<= 1850 & YEARDEP>=1807) |> filter( MJSELIMP1==20000) |>
+  left_join(lookup,by = "XMIMPFLAG")|> summarise(
+  totmean = sum(mean, na.rm=TRUE),
+  totmedian = sum(median,na.rm=TRUE),
+  diff = totmean-totmedian,
+  ratio = totmean/totmedian
+)
+  
+```
 
 
-goo |> summarise(N = sum(TSLAVESD))
-# that is 2742112	slaves on just over 8000 voyages. 
-
-mean(goo$TSLAVESD) * dim(goo)[1] # checks 
-
-# checks out
-
-goo |> group_by(XMIMPFLAG) |> summarise(
-                 mean = mean(TSLAVESD),
-                 N = n(),
-                 Nmean = N * mean)|> ungroup() |>
-  summarize(
-            tot = sum(Nmean)) # NN is the total from just over 8,000 voyages.
-
+```{r}
 
 #---------------------- tree
 
-foo <- df |> select(RIG,NATIONAL,EMBREG, TSLAVESD, YEAR10) |>  drop_na()
+#foo <- df |> select(RIG,NATIONAL,EMBREG, TSLAVESD , XMIMPFLAG) #|>  drop_na()
+foo <- df |> select(RIG,NATIONAL,EMBREG, TSLAVESD, YEAR5) #|>  drop_na()
 
 
-library(rpart)
-library(rpart.plot)
 
 
-foo$DATEDEP
-names(foo)
 
 foo$RIG <- as.factor(foo$RIG)
 foo$NATIONAL <- as.factor(foo$NATIONAL)
 foo$EMBREG <- as.factor(foo$EMBREG)
+foo$XMIMPFLAG <- as.factor(foo$XMIMPFLAG)
 
 
 # Fit a regression tree
@@ -130,7 +150,7 @@ fit <- rpart(TSLAVESD ~ ., data = foo, method = "anova")  # "anova" for regressi
 
 summary(fit)
 # Plot the regression tree
-rpart.plot(fit, type = 3, fallen.leaves = TRUE)
+#rpart.plot(fit, type = 3, fallen.leaves = TRUE)
 
 #write.csv(foo, here("data","foo.csv"))
 ```

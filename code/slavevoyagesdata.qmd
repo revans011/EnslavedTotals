@@ -1,8 +1,9 @@
 ---
 title: "slavevoyagesdata"
 format: html
-editor: visual
+editor: source
 ---
+
 ```{r}
 #| label: setup
 #| echo: false
@@ -24,7 +25,6 @@ knitr::opts_chunk$set(
 
 # Set seed for reproducibility
 ```
-
 
 ```{r}
 #from website with filter: Principal place where captives were landed -> Rhode Island
@@ -96,7 +96,6 @@ df <- DCSTVoyages  |> filter(First_region_of_slave_landing %in% us_states_from_l
 
 
 ```
-
 
 Now impute
 
@@ -178,7 +177,6 @@ imp <- mice(
 imp$loggedEvents
 summary(imp)
 ```
-
 
 ```{r}
 # 2. Create example data with some NAs
@@ -306,8 +304,6 @@ completed_list[[1]]
 
 ```
 
-
-
 ```{r}
 library(jomo)
 
@@ -334,9 +330,8 @@ completed2[[1]]
 
 ```
 
-
-
 now calculate the distribution of the imputed totals
+
 ```{r}
 
 # Convert mids object to long format
@@ -352,13 +347,11 @@ imp_long |> filter(voyage_id %in% slaveVoy_df$Voyage.ID) |>
 
 ```
 
-
 Now compare the distribution of the imputed totals to the totals from the website
 
 ```{r}
 
 ```
-
 
 -------------------------------------------------------e
 
@@ -374,7 +367,6 @@ Now compare the distribution of the imputed totals to the totals from the websit
 # names(df_merged_no_impute)
 
 ```
-
 
 ```{r}
 df2 <- DCSTVoyages |> select(c(
@@ -397,7 +389,6 @@ df2 <- DCSTVoyages |> select(c(
 
 write.csv(df2|>slice(1:50),here("data","forimp.csv"))
 ```
-
 
 ```{r}
 
@@ -436,4 +427,3 @@ library(missRanger)
 df_imp <- missRanger(df2, pmm.k = 3)
 
 ```
-
